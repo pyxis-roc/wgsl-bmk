@@ -1,4 +1,3 @@
-import { NumericLiteral } from "../../../node_modules/typescript/lib/typescript";
 import { TimingHelper } from "../types.mjs";
 import { adapter, safeRequestDevice, adapter_limits } from "../gpu_setup.js";
 

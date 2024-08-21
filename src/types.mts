@@ -1,6 +1,4 @@
 // Adapted from https://webgpufundamentals.org/webgpu/lessons/webgpu-timing.html
-import { adapter, timeSupport } from "./gpu_setup.js";
-
 export class TimingHelper {
   private canTimeStamp: boolean;
   private device: GPUDevice;

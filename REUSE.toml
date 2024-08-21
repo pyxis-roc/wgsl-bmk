@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2024 University of Rochester
+#
+# SPDX-License-Identifier: MIT
+version = 1
+
+[[annotations]]
+path = ["**/.json"]
+SPDX-License-Identifier = "MIT"
+SPDX-FileCopyrightText = "2024 University of Rochester"
+
+[[annotations]]
+path = ["public/**", "src/**"]
+SPDX-License-Identifier = "MIT"
+SPDX-FileCopyrightText = "2024 University of Rochester"
+
+[[annotations]]
+path = ["**/README.md"]
+

@@ -11,13 +11,10 @@ A simple benchmarking collector for webgpu kernels.
 
 ## Getting Started
 
-You will need python3, chrome, and 
-After cloning the repo, `cd` into its directory and execute the following command to get 
-. The easiest way to install this is to get npm and then type `npm install typescript.`
-Along with typescript, you will also need the definition files for webgpu: `npm install --save-dev @webgpu/types`
+You can run this locally with simple-server.py. You will need python3, npm, and node.
 
+After cloning the repo, `cd` into its directory.  Then run `npm install`.  This will download typescript and the webgpu types.  Then, execute `npm run build`.  This is just an alias for `tsc`. If you are making changes to the code, you can also do `tsc --watch` and it will automatically rebuild the website with any changes.
 
+Once the website has been built, you can use `simple-server.py` to serve its contents. Simply run `python3 simple-server.py`.  (You might have to change the port inside simple_server.py, default is 5030).
 
-To build, you will need typescript, along with the webgpu types.
-`npm install typescript`
-`npm install --save-dev @webgpu/types`
+Then, open up your browser and navigate to `localhost:5030`

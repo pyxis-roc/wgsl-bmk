@@ -201,7 +201,7 @@ await (async () => {
     level: 3,
     classList: ["feature-header-3"],
   });
-  addKeyValueList({ 
+  addKeyValueList({
     parent: webgpu_feature_div,
     kvList: adapterLimits as GPUSupportedLimitStringMap,
     key_classList: ["feature-key"],
