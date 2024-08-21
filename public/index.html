@@ -1,0 +1,63 @@
+<!--
+SPDX-FileCopyrightText: 2024 University of Rochester
+
+SPDX-License-Identifier: MIT
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>WGSL Benchmarking</title>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script type="module" src="/dist/wgsl_runners/script_matmul.js"></script>
+    <script type="module" src="/dist/get_webgpu_features.js"></script>
+    <link rel="stylesheet" href="/styles/style.css" />
+  </head>
+  <body>
+    <h1>WebGPU Benchmarking</h1>
+    <div>
+      <div id="webgpu-features" class="feature-box">
+        <h2 class="box-header">
+          WebGPU Features Supported on your Environment
+        </h2>
+      </div>
+    </div>
+
+    <div id="tfjs-bmk" class="tfjs">
+      <h1>TFJS Matrix Multiplication Benchmark</h1>
+      <p>
+        The benchmark performs 1024x1024 matrix multiplication mentioned in a
+        <a href="https://github.com/gpuweb/gpuweb/issues/1202">github issue</a>
+        discussing the performance impact of robust buffers. This example runs
+        nearly the same code referenced in the issue, with minor changes to
+        update the webgpu api calls. It also leverages the
+        <code>timestamp-query</code> extension to measure the elapsed time of
+        the compute passes directly rather than using javascript's
+        <code>performance.now()</code> method before and after submitting the
+        compute pipelines to the device queue.
+      </p>
+      <p>
+        The 'Run' button will execute matmul for 'iteration' times and get the
+        mean time.
+      </p>
+      <div id="tfjs-result-div">
+        <div id="warmup">
+          <font color="blue">PLEASE WAIT, WARMING UP...</font>
+        </div>
+        <b>Iterations</b>:
+        <input size="3" value="100" id="it" type="number" min="1" max="10000" />
+        <b>Results</b>
+        <input type="button" id="matmul" value="Run" size="1" />
+      </div>
+    </div>
+    <script type="module">
+      import { run, handleChange } from "/dist/wgsl_runners/script_matmul.js";
+
+      document.querySelector("#matmul").addEventListener("click", run);
+      var itElement = document.getElementById("it");
+      itElement.addEventListener("input", handleChange);
+    </script>
+  </body>
+</html>
