@@ -25,18 +25,16 @@ SPDX-License-Identifier: MIT
       </div>
     </div>
 
-    <div id="tfjs-bmk" class="tfjs">
-      <h1>TFJS Matrix Multiplication Benchmark</h1>
+    <div id="dequantize-bmk" class="tfjs">
+      <h1>Dequantize Benchmark</h1>
       <p>
-        The benchmark performs 1024x1024 matrix multiplication mentioned in a
-        <a href="https://github.com/gpuweb/gpuweb/issues/1202">github issue</a>
-        discussing the performance impact of robust buffers. This example runs
-        nearly the same code referenced in the issue, with minor changes to
-        update the webgpu api calls. It also leverages the
-        <code>timestamp-query</code> extension to measure the elapsed time of
-        the compute passes directly rather than using javascript's
-        <code>performance.now()</code> method before and after submitting the
-        compute pipelines to the device queue.
+        This benchmark executes the dequantize kernel. Note that the values are populated randomly instead
+        of with realistic values. As such, the output values are probably garbage. However, as this is meant to be used
+        for timing, the actual values are not important. What is important is how long it takes to run.
+
+        It's worth noting that unlike the matrix multiplication benchmark which has loops, this benchmark has no loops and is just
+        straightline code. As a result, the time it takes to run the benchmark is quite small, and the timing results due to 
+        bounds accesses may be overshadowed.
       </p>
       <p>
         The 'Run' button will execute matmul for 'iteration' times and get the
@@ -49,13 +47,13 @@ SPDX-License-Identifier: MIT
         <b>Iterations</b>:
         <input size="3" value="100" id="it" type="number" min="1" max="10000" />
         <b>Results</b>
-        <input type="button" id="matmul" value="Run" size="1" />
+        <input type="button" id="dequantize" value="Run" size="1" />
       </div>
     </div>
     <script type="module">
       import { run, handleChange } from "./dist/wgsl_runners/script_dequantize.js";
 
-      document.querySelector("#matmul").addEventListener("click", run);
+      document.querySelector("#dequantize").addEventListener("click", run);
       var itElement = document.getElementById("it");
       itElement.addEventListener("input", handleChange);
     </script>
