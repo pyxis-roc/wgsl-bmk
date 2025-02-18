@@ -3,7 +3,7 @@
         "build": "tsc"
     },
     "dependencies": {
-        "typescript": "^5.5.4",
-        "@webgpu/types": "^0.1.44"
+        "@webgpu/types": "^0.1.54",
+        "typescript": "^5.5.4"
     }
 }

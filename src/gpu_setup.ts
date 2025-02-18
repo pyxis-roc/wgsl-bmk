@@ -62,6 +62,7 @@ await (async () => {
 
   /// Use deprecated api if adapter.info is not available
   if (adapter.info === undefined || adapter.info === null) {
+    // @ts-ignore
     adapter_info = await adapter.requestAdapterInfo();
   }
 

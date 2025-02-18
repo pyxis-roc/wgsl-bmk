@@ -168,8 +168,10 @@ await (async () => {
   let adapter_info = adapter.info;
   if (
     adapter.info === undefined ||
+      // @ts-ignore
     (adapter.info === null && adapter.requestAdapterInfo)
   ) {
+      // @ts-ignore
     adapter_info = await adapter.requestAdapterInfo();
   }
   addKeyValueList({
