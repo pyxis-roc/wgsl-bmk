@@ -1,6 +1,6 @@
-import { Dequantize } from "scripts/runners/dequantize";
-import shader from "src/shaders/fused_fused_dequantize3_NT_matmul12_kernel.wgsl?raw";
-import variantShader from "src/shaders/fused_fused_dequantize3_NT_matmul12_kernel_variant1.wgsl?raw";
+import { Dequantize } from "./runners/dequantize";
+import shader from "/shaders/fused_fused_dequantize3_NT_matmul12_kernel.wgsl?raw";
+import variantShader from "/shaders/fused_fused_dequantize3_NT_matmul12_kernel_variant1.wgsl?raw";
 import { createResultTable } from "./element-builders";
 import { BooleanHolder, NumberHolder } from "./utils/valueHolders";
 

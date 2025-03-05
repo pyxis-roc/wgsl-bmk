@@ -2,11 +2,13 @@ import { type UserConfig, defineConfig } from "vite";
 
 /** @type {import('vite').UserConfig} */
 export default defineConfig({
-	root: ".",
+	root: "./src",
+	publicDir: "../public",
 	base: "/wgsl-bmk",
 	build: {
-		outDir: "dist", // corresponds to "outDir": "./public/dist"
-		target: "es2022", // corresponds to "target": "es2022"
+		outDir: "../dist",
+		emptyOutDir: true,
+		target: "es2022",
 		minify: false,
 		rollupOptions: {
 			input: {
@@ -18,9 +20,9 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			scripts: "/src/scripts",
-			src: "/src",
-			"@": "/src/scripts",
+			"#classes": "/scripts/classes",
+			"#scripts": "/scripts",
+			"#shaders": "/shaders",
 		},
 	},
 }) satisfies UserConfig;

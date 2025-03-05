@@ -4,6 +4,16 @@ on:
   push:
     branches:
       - main  # Change this to your default branch if it's not 'main'
+    paths:
+      - src/**
+      - public/**
+      - benchmarks/**
+      - .github/**
+      - vite.config.ts
+      - tsconfig.json
+      - package.json
+      - package-lock.json
+      - index.html
   workflow_dispatch:
   
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages

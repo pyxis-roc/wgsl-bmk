@@ -1,5 +1,5 @@
-import { TimingHelper } from "scripts/classes/TimingHelper.mjs";
-import { adapter, adapter_limits, safeRequestDevice } from "scripts/gpu_setup";
+import { TimingHelper } from "#scripts/classes/TimingHelper.mjs";
+import { adapter, adapter_limits, safeRequestDevice } from "#scripts/gpu_setup";
 
 // The maximum memory we need
 const dimAOuter = 1024;

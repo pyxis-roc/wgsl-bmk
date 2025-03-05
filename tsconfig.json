@@ -6,9 +6,12 @@
 		"module": "es2022",
 		"skipLibCheck": true,
 		"paths": {
-			"src/*": ["./src/*"],
-			"scripts/*": ["./src/scripts/*"]
+			"#scripts/*": ["scripts/*"],
+			"#shaders/*": ["shaders/*"],
+			"#runners/*": ["runners/*"],
+			"#classes/*": ["classes/*"],
 		},
+		"baseUrl": "./src",
 
 		/* Bundler Mode */
 		"moduleResolution": "bundler",
