@@ -3,6 +3,7 @@ import { type UserConfig, defineConfig } from "vite";
 /** @type {import('vite').UserConfig} */
 export default defineConfig({
 	root: ".",
+	base: "/wgsl-bmk",
 	build: {
 		outDir: "dist", // corresponds to "outDir": "./public/dist"
 		target: "es2022", // corresponds to "target": "es2022"
