@@ -39,7 +39,7 @@ jobs:
       - name: Install dependencies
         run: npm install --production
       - name: Build project
-        run: npm run build
+        run: VITE_BASE_URL_PREFIX=/wgsl-bmk npm run build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
