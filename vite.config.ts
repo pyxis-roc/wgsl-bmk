@@ -9,6 +9,7 @@ export default defineConfig({
 		minify: false,
 		rollupOptions: {
 			input: {
+				index: "/index.html",
 				dequantize: "/benchmarks/dequantize.html",
 				matmul: "/benchmarks/matmul.html",
 			},
