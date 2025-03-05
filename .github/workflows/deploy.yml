@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: '21.6.2' 
       - name: Install dependencies
-        run: npm install
+        run: npm install --production
       - name: Build project
         run: npm run build
       - name: Upload artifact
