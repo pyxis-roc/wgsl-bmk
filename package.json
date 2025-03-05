@@ -1,9 +1,17 @@
 {
-    "scripts": {
-        "build": "tsc"
-    },
-    "dependencies": {
-        "@webgpu/types": "^0.1.54",
-        "typescript": "^5.5.4"
-    }
+	"name": "wgpu-benchmark-runner",
+	"version": "1.0.0",
+	"private": true,
+	"scripts": {
+		"dev": "vite",
+		"build": "tsc && vite build",
+		"preview": "vite preview"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/node": "^22.13.9",
+		"@webgpu/types": "^0.1.54",
+		"typescript": "^5.7.2",
+		"vite": "^6.2.0"
+	}
 }

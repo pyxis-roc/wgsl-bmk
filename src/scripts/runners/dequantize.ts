@@ -1,425 +1,394 @@
-import { TimingHelper } from "../types.mjs";
-import { adapter, safeRequestDevice, adapter_limits } from "../gpu_setup.js";
+import { TimingHelper } from "scripts/classes/TimingHelper.mjs";
+import { adapter, adapter_limits, safeRequestDevice } from "scripts/gpu_setup";
 
-const NUM_ELEMENTS = 1024;
-const LV_1995_SIZE = NUM_ELEMENTS;
-const LV_1996_SIZE = NUM_ELEMENTS / 4;
-
-/** How many elements are being processed per block */
-const packGridDimX = NUM_ELEMENTS / 256;
-/** How many blocks should there be */
-const NUM_BLOCKS = packGridDimX;
-
-const WORKGROUP_SIZE_X = 64; // Workgroup size has been hardcoded to 64 in the shader
-const RMS_NORM_SIZE = 2048; // Max index is threadIdx * 8 + 1563. 63 * 8 + 1563 = 2047
-
-const NT_MATMUL_SIZE = packGridDimX;
-/** How many iterations to run by default */
-const DEFAULT_ITERATION = 100;
-/// The maximum workgroup size we need is..
-/// WORKGROUP_SIZE_X * WORK_PER_THREAD_X * 4
-/** Number of decimal digits to display for the timestamp */
-const TIMESTAMP_PRECISION = 3;
-/** Number of decimal digits to display for the result */
-const RESULT_PRECISION = 3;
-/// Set a max iterations to stop browsers from crashing
-const MAX_ITERATIONS = 10000;
-const MIN_ITERATIONS = 1;
-var computePipeline: GPUComputePipeline;
-var bindGroup: GPUBindGroup;
-var gpuReadBuffer: GPUBuffer;
-var lv1995_Host, lv1996_Host, rms_norm46_Host;
-var iteration = DEFAULT_ITERATION;
-var commandQueue = [];
-var timingEncoder: TimingHelper;
+/** The GPU device */
 const device = await safeRequestDevice(adapter, ["timestamp-query"], {
-    maxComputeWorkgroupStorageSize:
-        adapter_limits.maxComputeWorkgroupStorageSize,
+	maxComputeWorkgroupStorageSize: adapter_limits.maxComputeWorkgroupStorageSize,
 });
 
-timingEncoder = new TimingHelper(device);
-// Check if we can get timestamp support here.
-function recordCommands() {
-    const commandEncoder = device.createCommandEncoder();
-    const passEncoder = timingEncoder.beginComputePass(commandEncoder);
-    passEncoder.setPipeline(computePipeline);
-    passEncoder.setBindGroup(0, bindGroup);
-    passEncoder.dispatchWorkgroups(NUM_BLOCKS);
-    passEncoder.end();
-    commandQueue.push(commandEncoder);
+/**
+ * Initialize buffer data
+ * @param sizeInBytes The size of the buffer, in bytes
+ * @param arrayTy: The type of the array to initialize
+ * @param initMethod: The method to use to initialize the buffer
+ */
+function initHostBuffer<
+	T extends Float32ArrayConstructor | Uint32ArrayConstructor,
+>(
+	sizeInBytes: number,
+	arrayConstructor: T,
+	initMethod: InstanceType<T> | "random" | number,
+): InstanceType<T> {
+	if (typeof initMethod === "number") {
+		return new arrayConstructor(
+			sizeInBytes / arrayConstructor.BYTES_PER_ELEMENT,
+		).fill(initMethod) as InstanceType<T>;
+	}
+	if (initMethod !== "random") {
+		return initMethod;
+	}
+
+	const elemFunc: () => number =
+		arrayConstructor instanceof Uint32Array
+			? () => Math.floor(Math.random() * 4294967295)
+			: Math.random;
+
+	const hostArray = new arrayConstructor(
+		sizeInBytes / arrayConstructor.BYTES_PER_ELEMENT,
+	);
+
+	for (let i = 0; i < hostArray.length; i++) {
+		hostArray[i] = elemFunc();
+	}
+
+	return hostArray as InstanceType<T>;
 }
 
-function submitQueue() {
-    // We need the total duration of all kernels in the queue...
-    // If we submit each one, then
-    device.queue.submit(commandQueue.map((enc) => enc.finish()));
-    commandQueue = [];
+export interface kernelExecutionResults {
+	meanTime: number;
+	meanTimePNow: number;
+	result: number;
+	iterations: number;
 }
 
-document
-    .getElementById("it")
-    .setAttribute("value", DEFAULT_ITERATION.toString());
-document.getElementById("it").setAttribute("max", MAX_ITERATIONS.toString());
-document.getElementById("it").setAttribute("min", MIN_ITERATIONS.toString());
-(document.getElementById("it") as HTMLInputElement).value =
-    DEFAULT_ITERATION.toString();
-(async () => {
-    if (!navigator.gpu) {
-        console.log(
-            "WebGPU is not supported. Enable chrome://flags/#enable-unsafe-webgpu flag."
-        );
-        return;
-    }
-    timingEncoder = new TimingHelper(device);
-    // Uniform Buffer
-    const podArgs_Host = new Uint32Array([packGridDimX]);
-    const podArgs_Device = device.createBuffer({
-        mappedAtCreation: true,
-        size: podArgs_Host.byteLength,
-        usage: GPUBufferUsage.UNIFORM,
-    });
-    new Uint32Array(podArgs_Device.getMappedRange()).set(podArgs_Host);
-    podArgs_Device.unmap();
+export class Dequantize {
+	commandQueue: GPUCommandEncoder[] = [];
+	timingEncoder: TimingHelper;
+	gpu: GPUDevice;
+	/** The device buffer used to read the contents of the kernel output */
+	gpuReadBuffer: GPUBuffer;
 
-    // Second Matrix
-    lv1995_Host = new Uint32Array(LV_1995_SIZE);
-    for (var i = 0; i < LV_1995_SIZE; i++) {
-        lv1995_Host[i] = Math.floor(Math.random() * 4294967295);
-    }
-    const lv1995_Device = device.createBuffer({
-        mappedAtCreation: true,
-        size: lv1995_Host.byteLength,
-        usage: GPUBufferUsage.STORAGE,
-    });
-    new Uint32Array(lv1995_Device.getMappedRange()).set(lv1995_Host);
-    lv1995_Device.unmap();
+	/**The name of the entry point for the kernel */
+	entryPointName: string;
 
-    lv1996_Host = new Uint32Array(LV_1996_SIZE);
-    for (var i = 0; i < LV_1996_SIZE; i++) {
-        lv1996_Host[i] = Math.floor(Math.random() * 4294967295);
-    }
-    const lv1996_Device = device.createBuffer({
-        mappedAtCreation: true,
-        size: lv1995_Host.byteLength,
-        usage: GPUBufferUsage.STORAGE,
-    });
-    new Uint32Array(lv1996_Device.getMappedRange()).set(lv1995_Host);
-    lv1996_Device.unmap();
+	/** The comppute pipeline attached to this dequantize instance.*/
+	private pipeline: GPUComputePipeline;
 
-    rms_norm46_Host = new Float32Array(RMS_NORM_SIZE);
-    for (var i = 0; i < RMS_NORM_SIZE; i++) {
-        rms_norm46_Host[i] = Math.random();
-    }
-    const rms_norm46_Device = device.createBuffer({
-        mappedAtCreation: true,
-        size: rms_norm46_Host.byteLength,
-        usage: GPUBufferUsage.STORAGE,
-    });
-    new Float32Array(rms_norm46_Device.getMappedRange()).set(rms_norm46_Host);
-    rms_norm46_Device.unmap();
+	/** Holds the promise o */
+	private computePipelinePromiseResult: Promise<GPUError | null>;
+	private shaderCreationPromiseResult: Promise<GPUError | null>;
 
-    // Result Matrix
-    const NT_matmul_BufferSize =
-        Float32Array.BYTES_PER_ELEMENT * NT_MATMUL_SIZE;
-    const NT_matmul_Device = device.createBuffer({
-        size: NT_matmul_BufferSize,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-    // Bind group layout and bind group
-    const bindGroupLayout = device.createBindGroupLayout({
-        entries: [
-            {
-                binding: 0,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "storage" },
-            },
-            {
-                binding: 1,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "read-only-storage" },
-            },
-            {
-                binding: 2,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "read-only-storage" },
-            },
-            {
-                binding: 3,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "read-only-storage" },
-            },
-            {
-                binding: 4,
-                visibility: GPUShaderStage.COMPUTE,
-                buffer: { type: "uniform" },
-            },
-        ],
-    });
-    bindGroup = device.createBindGroup({
-        layout: bindGroupLayout,
-        entries: [
-            { binding: 0, resource: { buffer: NT_matmul_Device } },
-            { binding: 1, resource: { buffer: lv1995_Device } },
-            { binding: 2, resource: { buffer: lv1996_Device } },
-            { binding: 3, resource: { buffer: rms_norm46_Device } },
-            { binding: 4, resource: { buffer: podArgs_Device } },
-        ],
-    });
+	private initialized = false;
+	private NT_matmul: GPUBuffer;
+	private bindGroup: GPUBindGroup;
+	/** Set to true once the instance has been constructed to prevent init methods from being called after setup */
+	private readonly constructed: boolean;
+	static readonly NUM_WORKGROUPS_X: GPUSize32 = 16384;
+	static readonly NUM_WORKGROUPS_Y: GPUSize32 = 1;
+	static readonly NUM_WORKGROUPS_Z: GPUSize32 = 1;
+	static readonly ENTRY_POINT = "fused_fused_dequantize3_NT_matmul12_kernel";
+	static readonly NT_MATMUL_BYTES = 65536;
+	static readonly LV1995_BYTES = 4194304;
+	static readonly LV1996_BYTES = 16777216;
+	static readonly RMS_NORM_BYTES = 32768;
+	static readonly PACK_GRID_DIM_X = (Dequantize.NT_MATMUL_BYTES / Float32Array.BYTES_PER_ELEMENT) / 64;
+	static readonly BIND_GROUP_LAYOUT: GPUBindGroupLayoutDescriptor = {
+		entries: [
+			{
+				binding: 0,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "storage" },
+			},
+			{
+				binding: 1,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "read-only-storage" },
+			},
+			{
+				binding: 2,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "read-only-storage" },
+			},
+			{
+				binding: 3,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "read-only-storage" },
+			},
+			{
+				binding: 4,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "uniform" },
+			},
+		],
+	};
 
-    const shaderCode = `@group(0) @binding(0) var<storage, read_write> NT_matmul : array<f32>;
-@group(0) @binding(1) var<storage, read> lv1995 : array<u32>;
-@group(0) @binding(2) var<storage, read> lv1996 : array<f32>;
-@group(0) @binding(3) var<storage, read> rms_norm46 : array<f32>;
+	initializePipeline(
+		layout: GPUPipelineLayout,
+		module: GPUShaderModule,
+		entryPointName: string,
+	): GPUComputePipeline {
+		return this.gpu.createComputePipeline({
+			layout,
+			compute: { module, entryPoint: entryPointName },
+		});
+	}
 
-struct PODArgs {
-  packGridDimX: u32
-}
-@group(0) @binding(4) var<uniform> podArgs : PODArgs;
+	/**
+	 * Construct the dequantize instance.
+	 * You must call {@linkcode Dequantize.init init } before running the kernel.
+	 * The constructor cannot do this, as it is an async operation.
+	 */
+	constructor(moduleSource: string, entryPointName: string) {
+		if (!navigator.gpu) {
+			throw new Error(
+				"WebGPU is not supported. Enable chrome://flags/#enable-unsafe-webgpu flag.",
+			);
+		}
 
-var<workgroup> red_buf0 : array<f32, 64>;
-@compute @workgroup_size(64, 1, 1)
-fn fused_fused_dequantize3_NT_matmul12_kernel(
-  @builtin(workgroup_id) blockIdx : vec3<u32>,
-  @builtin(num_workgroups) gridDim : vec3<u32>,
-  @builtin(local_invocation_id) threadIdx : vec3<u32>
-) {
-  if (blockIdx.z * gridDim.x + blockIdx.x > podArgs.packGridDimX) { return; }
-  let v__1 : i32 = i32(blockIdx.z * gridDim.x + blockIdx.x);
-  // check all indices
-  var bounds_check_pass: bool = true;
-  if (((i32(threadIdx.x) * 8i) + 1543i) < 0 || u32((i32(threadIdx.x) * 8i) + 1543i) >= arrayLength(&rms_norm46)) {
-    bounds_check_pass = false;
-  }
-  if ((v__1 * 256i) + i32(threadIdx.x) < 0 || u32((v__1 * 256i) + i32(threadIdx.x)) >= arrayLength(&lv1995)) {
-    bounds_check_pass = false;
-  }
-  if (((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i < 0 || u32(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i) >= arrayLength(&lv1996)) {
-    bounds_check_pass = false;
-  }
-  if (v__1 < 0 || u32(v__1) >= arrayLength(&NT_matmul)) {
-    bounds_check_pass = false;
-  }
-  // can't use arrayLength for red_buf0 as it has a constant size.
-  if ((i32(threadIdx.x) + 32i) < 0 || u32(i32(threadIdx.x) + 32i) >= 64) {
-    bounds_check_pass = false;
-  }
-  var NT_matmul_rf_local : array<f32, 1>;
-  var lv1995_local : array<u32, 1>;
-  var NT_matmul_rf_local_1 : array<f32, 1>;
-  NT_matmul_rf_local[0i] = 0.000000e+00f;
-  if (bounds_check_pass) {
-  lv1995_local[0i] = lv1995[((v__1 * 256i) + i32(threadIdx.x))];
-  NT_matmul_rf_local[0i] = fma(rms_norm46[(i32(threadIdx.x) * 8i)], ((f32(((lv1995_local[0i]>>0u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1i)], ((f32(((lv1995_local[0i]>>4u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 2i)], ((f32(((lv1995_local[0i]>>8u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 3i)], ((f32(((lv1995_local[0i]>>12u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 4i)], ((f32(((lv1995_local[0i]>>16u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 5i)], ((f32(((lv1995_local[0i]>>20u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 6i)], ((f32(((lv1995_local[0i]>>24u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 7i)], ((f32(((lv1995_local[0i]>>28u) & 15u)) - 7.000000e+00f) * lv1996[((v__1 * 64i) + (i32(threadIdx.x)>>2u))]), NT_matmul_rf_local[0i]);
-  lv1995_local[0i] = lv1995[(((v__1 * 256i) + i32(threadIdx.x)) + 64i)];
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 512i)], ((f32(((lv1995_local[0i]>>0u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 513i)], ((f32(((lv1995_local[0i]>>4u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 514i)], ((f32(((lv1995_local[0i]>>8u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 515i)], ((f32(((lv1995_local[0i]>>12u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 516i)], ((f32(((lv1995_local[0i]>>16u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 517i)], ((f32(((lv1995_local[0i]>>20u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 518i)], ((f32(((lv1995_local[0i]>>24u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 519i)], ((f32(((lv1995_local[0i]>>28u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 16i)]), NT_matmul_rf_local[0i]);
-  lv1995_local[0i] = lv1995[(((v__1 * 256i) + i32(threadIdx.x)) + 128i)];
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1024i)], ((f32(((lv1995_local[0i]>>0u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1025i)], ((f32(((lv1995_local[0i]>>4u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1026i)], ((f32(((lv1995_local[0i]>>8u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1027i)], ((f32(((lv1995_local[0i]>>12u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1028i)], ((f32(((lv1995_local[0i]>>16u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1029i)], ((f32(((lv1995_local[0i]>>20u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1030i)], ((f32(((lv1995_local[0i]>>24u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1031i)], ((f32(((lv1995_local[0i]>>28u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 32i)]), NT_matmul_rf_local[0i]);
-  lv1995_local[0i] = lv1995[(((v__1 * 256i) + i32(threadIdx.x)) + 192i)];
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1536i)], ((f32(((lv1995_local[0i]>>0u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1537i)], ((f32(((lv1995_local[0i]>>4u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1538i)], ((f32(((lv1995_local[0i]>>8u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1539i)], ((f32(((lv1995_local[0i]>>12u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1540i)], ((f32(((lv1995_local[0i]>>16u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1541i)], ((f32(((lv1995_local[0i]>>20u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1542i)], ((f32(((lv1995_local[0i]>>24u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local[0i] = fma(rms_norm46[((i32(threadIdx.x) * 8i) + 1543i)], ((f32(((lv1995_local[0i]>>28u) & 15u)) - 7.000000e+00f) * lv1996[(((v__1 * 64i) + (i32(threadIdx.x)>>2u)) + 48i)]), NT_matmul_rf_local[0i]);
-  NT_matmul_rf_local_1[0i] = 0.000000e+00f;
-  NT_matmul_rf_local_1[0i] = (NT_matmul_rf_local_1[0i] + NT_matmul_rf_local[0i]);
-  }
-  workgroupBarrier();
-  red_buf0[i32(threadIdx.x)] = NT_matmul_rf_local_1[0i];
-  workgroupBarrier();
-  if (i32(threadIdx.x) < 32i && bounds_check_pass) {
-    red_buf0[i32(threadIdx.x)] = (red_buf0[i32(threadIdx.x)] + red_buf0[(i32(threadIdx.x) + 32i)]);
-  }
-  workgroupBarrier();
-  if (i32(threadIdx.x) < 16i && bounds_check_pass) {
-    red_buf0[i32(threadIdx.x)] = (red_buf0[i32(threadIdx.x)] + red_buf0[(i32(threadIdx.x) + 16i)]);
-  }
-  workgroupBarrier();
-  if (i32(threadIdx.x) < 8i && bounds_check_pass) {
-    red_buf0[i32(threadIdx.x)] = (red_buf0[i32(threadIdx.x)] + red_buf0[(i32(threadIdx.x) + 8i)]);
-  }
-  workgroupBarrier();
-  if (i32(threadIdx.x) < 4i && bounds_check_pass) {
-    red_buf0[i32(threadIdx.x)] = (red_buf0[i32(threadIdx.x)] + red_buf0[(i32(threadIdx.x) + 4i)]);
-  }
-  workgroupBarrier();
-  if (i32(threadIdx.x) < 2i && bounds_check_pass) {
-    red_buf0[i32(threadIdx.x)] = (red_buf0[i32(threadIdx.x)] + red_buf0[(i32(threadIdx.x) + 2i)]);
-  }
-  workgroupBarrier();
-  if (i32(threadIdx.x) < 1i && bounds_check_pass) {
-    red_buf0[i32(threadIdx.x)] = (red_buf0[i32(threadIdx.x)] + red_buf0[(i32(threadIdx.x) + 1i)]);
-  }
-  workgroupBarrier();
-  if (i32(threadIdx.x) == 0i && bounds_check_pass) {
-    NT_matmul[v__1] = red_buf0[0i];
-  }
-}
-`;
-    // Pipeline setup
-    computePipeline = device.createComputePipeline({
-        layout: device.createPipelineLayout({
-            bindGroupLayouts: [bindGroupLayout],
-        }),
-        compute: {
-            module: device.createShaderModule({
-                code: shaderCode,
-            }),
-            entryPoint: "fused_fused_dequantize3_NT_matmul12_kernel",
-        },
-    });
-    recordCommands();
-    // Get a GPU buffer for reading in an unmapped state.
-    gpuReadBuffer = device.createBuffer({
-        size: NT_matmul_BufferSize,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    });
-    // Encode commands for copying buffer to buffer.
-    const commandEncoder = device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(
-        NT_matmul_Device /* source buffer */,
-        0 /* source offset */,
-        gpuReadBuffer /* destination buffer */,
-        0 /* destination offset */,
-        NT_matmul_BufferSize /* size */
-    );
-    commandQueue.push(commandEncoder);
-    // Submit GPU commands.
-    submitQueue();
-    // Read buffer.
-    await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-    const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
-    // On warmup finished, remove the warmup div.
-    document.getElementById("warmup")?.remove();
-    /*
-    for (var i = 0; i < dimAOuter; i++)
-    for (var j = 0; j< dimBOuter; j++)
-    {
-      let test = 0;
-      for (var k =0; k < dimInner; k++)
-      {
-        test += firstMatrix[i * dimInner + k] * secondMatrix[k * dimBOuter + j];
-      }
-      console.log(`result[${i}, ${j}] = ${arrayBuffer[i * dimBOuter + j]}, expectedResult = ${test}`);
-    }
-    */
-    gpuReadBuffer.unmap();
-    initializeResultTable();
-})();
-/// Add event listenner that validates the input and updates iteration
-export function handleChange(e: { target: { value: string } }) {
-    // Only allow whole numbers
-    const match = e.target.value.match(/[0]*(\d+)([^\d]|$)/);
-    e.target.value = match ? match[1] : iteration.toString();
-    iteration = Math.min(parseInt(e.target.value), MAX_ITERATIONS);
-}
-function initializeResultTable() {
-    // Don't initialize if it already exists.
-    if (document.getElementById("dequantize-result-table") !== null) return;
-    // Make the headers
-    const resultTable = document.createElement("table");
-    resultTable.id = "dequantize-result-table";
-    resultTable.classList.add("result-table", "dequantize");
-    resultTable.setAttribute("hidden", "");
-    var header = document.createElement("thead");
-    var headerRow = document.createElement("tr");
-    [
-        { text: "Iterations", tooltip: "Number of iterations" },
-        {
-            text: "Shader time (ms)",
-            tooltip: "Amount of time passed measured using timestamp queries",
-        },
-        { text: "Js time (ms)", tooltip: "" },
-        {
-            text: "Result",
-            tooltip:
-                "The computed value of some random element in the result matrix",
-        },
-    ].forEach((entry) => {
-        var th = document.createElement("th");
-        th.textContent = entry.text;
-        th.title = entry.tooltip;
-        headerRow.appendChild(th);
-    });
-    header.appendChild(headerRow);
-    resultTable.appendChild(header);
-    var tbody = document.createElement("tbody");
-    tbody.id = "dequantize-result-table-body";
-    resultTable.appendChild(tbody);
-    document.getElementById("dequantize-result-div").appendChild(resultTable);
-}
-function addResultRow(
-    timestamp_time: number,
-    js_time: number,
-    result: number,
-    iterations: number
-) {
-    document
-        .getElementById("dequantize-result-table")
-        .removeAttribute("hidden");
-    var tbody = document.getElementById("dequantize-result-table-body");
-    var row = document.createElement("tr");
-    [
-        iterations,
-        timestamp_time.toFixed(TIMESTAMP_PRECISION),
-        js_time.toFixed(TIMESTAMP_PRECISION),
-        result.toFixed(RESULT_PRECISION),
-    ].forEach((value) => {
-        var td = document.createElement("td");
-        td.innerText = `${value}`;
-        row.appendChild(td);
-    });
-    tbody.appendChild(row);
-}
-export async function run() {
-    //   const computeFence = device.queue.createFence();
-    // iteration = parseInt((document.getElementById("it") as HTMLInputElement).value , 10);
-    var start = performance.now();
-    for (var i = 0; i < iteration; i++) {
-        recordCommands();
-    }
-    device.queue.submit(commandQueue.map((enc) => enc.finish()));
-    commandQueue.length = 0;
-    const perf_now_ttl_time = await device.queue
-        .onSubmittedWorkDone()
-        .then(() => {
-            return performance.now() - start;
-        });
-    const total_time = await timingEncoder.getResult();
-    // Read buffer.
-    await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-    const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
+		this.gpu = device;
+		this.timingEncoder = new TimingHelper(device);
 
-    const meanTime = total_time / 1000000 / iteration;
-    const meanTimePNow = perf_now_ttl_time / iteration;
-    addResultRow(
-        meanTime,
-        meanTimePNow,
-        arrayBuffer[0],
-        iteration
-    );
-    gpuReadBuffer.unmap();
+		const bindGroupLayout = device.createBindGroupLayout(
+			Dequantize.BIND_GROUP_LAYOUT,
+		);
+		this.bindGroup = this.doBindBuffers(bindGroupLayout);
+
+		const pipelineLayout = device.createPipelineLayout({
+			bindGroupLayouts: [bindGroupLayout],
+		});
+
+		device.pushErrorScope("validation");
+		const module = device.createShaderModule({ code: moduleSource });
+		this.shaderCreationPromiseResult = device.popErrorScope();
+		/* Create the pipeline and shader module */
+
+		this.entryPointName = entryPointName;
+
+		device.pushErrorScope("validation");
+		this.pipeline = this.initializePipeline(
+			pipelineLayout,
+			module,
+			entryPointName,
+		);
+
+		// Store the promise result of initializing the computePipeline.
+		this.computePipelinePromiseResult = device.popErrorScope();
+
+		// Get a GPU buffer for reading in an unmapped state.
+		this.gpuReadBuffer = device.createBuffer({
+			size: Dequantize.NT_MATMUL_BYTES,
+			usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+		});
+
+		this.constructed = true;
+	}
+
+	/**
+	 * Initialize the dequantize instance.
+	 * Throws a GPUError if there was an error creating the shader module or compute Pipeline.
+	 * If this throws an error, the instance is not usable and should be discarded.
+	 */
+	async init() {
+		if (!this.constructed) {
+			throw new Error("Dequantize instance was not constructed properly.");
+		}
+		// Catch the shaderCreation error first, if it's null there's no error, so get the compute pipeline error.
+		const error =
+			(await this.shaderCreationPromiseResult) ||
+			(await this.computePipelinePromiseResult);
+		if (error) {
+			throw error;
+		}
+		this.recordCommands();
+		const commandEncoder = this.gpu.createCommandEncoder();
+		commandEncoder.copyBufferToBuffer(
+			this.NT_matmul /* source buffer */,
+			0 /* source offset */,
+			this.gpuReadBuffer /* destination buffer */,
+			0 /* destination offset */,
+			Dequantize.NT_MATMUL_BYTES /* size */,
+		);
+		this.commandQueue.push(commandEncoder);
+
+		// Wait for the GPU to finish...
+		await this.gpu.queue.onSubmittedWorkDone();
+
+		this.initialized = true;
+	}
+
+	/** Create a new commandEncoder and have it just copy the contents of NT_matmul to GPUReadBuffer */
+	async readGPUBuffer(idx = 0): Promise<number> {
+		// Unmap in case it was already mapped.
+		if (this.gpuReadBuffer.mapState === "mapped") {
+			this.gpuReadBuffer.unmap();
+		}
+		const commandEncoder = device.createCommandEncoder();
+		commandEncoder.copyBufferToBuffer(
+			this.NT_matmul /* source buffer */,
+			0 /* source offset */,
+			this.gpuReadBuffer /* destination buffer */,
+			0 /* destination offset */,
+			Dequantize.NT_MATMUL_BYTES /* size */,
+		);
+		this.commandQueue.push(commandEncoder);
+		await this.gpu.queue.onSubmittedWorkDone();
+		// Read buffer.
+
+		await this.gpuReadBuffer.mapAsync(GPUMapMode.READ);
+		const result = new Float32Array(this.gpuReadBuffer.getMappedRange())[idx];
+		this.gpuReadBuffer.unmap();
+		return result;
+	}
+
+	/**
+	 * Run this dequantize instance.
+	 * @returns
+	 * @param numIterations The number of iterations to run.
+	 * @throws Error if the initialization is still running.
+	 */
+	public async run(
+		numIterations: number,
+		result_index = 0,
+	): Promise<kernelExecutionResults> {
+		if (!this.initialized) {
+			console.error("Initialization is still running...");
+			throw new Error("Initialization is still running...");
+		}
+		// const computeFence = device.queue.createFence();
+		// iteration = parseInt((document.getElementById("it") as HTMLInputElement).value , 10);
+
+		const start = performance.now();
+		for (let i = 0; i < numIterations; i++) {
+			this.recordCommands();
+		}
+
+		device.queue.submit(this.commandQueue.map((enc) => enc.finish()));
+		this.commandQueue.length = 0;
+
+		const perf_now_ttl_time = await device.queue
+			.onSubmittedWorkDone()
+			.then(() => {
+				return performance.now() - start;
+			});
+		const total_time = await this.timingEncoder.getResult();
+		const meanTime = total_time / 1000000 / numIterations;
+		const meanTimePNow = perf_now_ttl_time / numIterations;
+
+		const result = await this.readGPUBuffer();
+
+		// Read buffer
+
+		return {
+			meanTime,
+			meanTimePNow,
+			result: result,
+			iterations: numIterations,
+		};
+	}
+
+	/**
+	 * Record the commands to the command queue.
+	 */
+	recordCommands() {
+		const commandEncoder = this.gpu.createCommandEncoder();
+		const passEncoder = this.timingEncoder.beginComputePass(commandEncoder);
+		passEncoder.setPipeline(this.pipeline);
+		passEncoder.setBindGroup(0, this.bindGroup);
+		passEncoder.dispatchWorkgroups(
+			Dequantize.NUM_WORKGROUPS_X,
+			Dequantize.NUM_WORKGROUPS_Y,
+			Dequantize.NUM_WORKGROUPS_Z,
+		);
+		passEncoder.end();
+		this.commandQueue.push(commandEncoder);
+	}
+
+	clearCommandQueue() {
+		this.commandQueue.length = 0;
+	}
+
+	createGPUBuffer(
+		sizeInBytes: number,
+		usage: GPUBufferUsageFlags,
+		arrayType: Uint32ArrayConstructor,
+		initialize?: "random" | Uint32Array,
+	): GPUBuffer;
+	createGPUBuffer(
+		sizeInBytes: number,
+		usage: GPUBufferUsageFlags,
+		arrayType: Float32ArrayConstructor,
+		initialize?: "random" | Float32Array,
+	): GPUBuffer;
+
+	/**
+	 * Create a GPU buffer with the given parameters.
+	 * @param device The GPU device
+	 * @param sizeInBytes The size of the buffer, in bytes.
+	 * @param usage The usage flags
+	 * @param setData Whether to set the data in the buffer
+	 * @param arrayType The constructor for the host buffer.
+	 * @returns The GPU buffer in an unmapped state.
+	 */
+	createGPUBuffer<T extends Float32ArrayConstructor | Uint32ArrayConstructor>(
+		sizeInBytes: number,
+		usage: GPUBufferUsageFlags,
+		arrayType: T,
+		initialize?: InstanceType<T> | "random",
+	): GPUBuffer {
+		const buffer = this.gpu.createBuffer({
+			mappedAtCreation: !!initialize,
+			size: sizeInBytes,
+			usage,
+		});
+
+		if (!initialize) return buffer;
+
+		new arrayType(buffer.getMappedRange()).set(
+			initHostBuffer(sizeInBytes, arrayType, initialize),
+		);
+		buffer.unmap();
+
+		return buffer;
+	}
+
+	/** Create and initialize the buffers (with random data) to be used by the dequantize kernel.
+	 * Sets `this.NT_matmul` to reference the GPU buffer that is provided as the NT_matmul buffer to the kernel.
+	 */
+	doBindBuffers(bindGroupLayout: GPUBindGroupLayout): GPUBindGroup {
+		if (this.constructed) {
+			return this.bindGroup;
+		}
+		const STORAGE = GPUBufferUsage.STORAGE;
+		const lv1995 = this.createGPUBuffer(
+			Dequantize.LV1995_BYTES,
+			STORAGE,
+			Uint32Array,
+			"random",
+		);
+		const lv1996 = this.createGPUBuffer(
+			Dequantize.LV1996_BYTES,
+			STORAGE,
+			Float32Array,
+			"random",
+		);
+		const rms_norm46 = this.createGPUBuffer(
+			Dequantize.RMS_NORM_BYTES,
+			STORAGE,
+			Float32Array,
+			"random",
+		);
+		this.NT_matmul = this.createGPUBuffer(
+			Dequantize.NT_MATMUL_BYTES,
+			STORAGE | GPUBufferUsage.COPY_SRC,
+			Float32Array,
+		);
+
+		const podArgs = this.createGPUBuffer(
+			Uint32Array.BYTES_PER_ELEMENT,
+			GPUBufferUsage.UNIFORM,
+			Uint32Array,
+			new Uint32Array([Dequantize.PACK_GRID_DIM_X]),
+		);
+
+		return this.gpu.createBindGroup({
+			layout: bindGroupLayout,
+			entries: [
+				{ binding: 0, resource: { buffer: this.NT_matmul } },
+				{ binding: 1, resource: { buffer: lv1995 } },
+				{ binding: 2, resource: { buffer: lv1996 } },
+				{ binding: 3, resource: { buffer: rms_norm46 } },
+				{ binding: 4, resource: { buffer: podArgs } },
+			],
+		});
+	}
 }

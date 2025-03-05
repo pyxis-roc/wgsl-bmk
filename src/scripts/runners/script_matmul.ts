@@ -1,18 +1,19 @@
-import { TimingHelper } from "../types.mjs";
-import { adapter, safeRequestDevice, adapter_limits } from "../gpu_setup.js";
+import { TimingHelper } from "scripts/classes/TimingHelper.mjs";
+import { adapter, adapter_limits, safeRequestDevice } from "scripts/gpu_setup";
 
 // The maximum memory we need
 const dimAOuter = 1024;
 const dimInner = 1024;
 const dimBOuter = 1024;
 const WORKGROUP_SIZE_X = 16;
+
 const WORKGROUP_SIZE_Y = 16;
 
 /// Adjust the work per thread based on the adapter limits.
 /// Adjusting this is OK since we dispatch enough workgroups to cover the entire matrix
 /// based on these values.
 const WORK_PER_THREAD_X =
-  adapter_limits.maxComputeWorkgroupStorageSize < 32768 ? 2 : 4;
+	adapter_limits.maxComputeWorkgroupStorageSize < 32768 ? 2 : 4;
 const WORK_PER_THREAD_Y = WORK_PER_THREAD_X;
 const DEFAULT_ITERATION = 100;
 
@@ -27,17 +28,18 @@ const RESULT_PRECISION = 3;
 /// Set a max iterations to stop browsers from crashing
 const MAX_ITERATIONS = 10000;
 const MIN_ITERATIONS = 1;
-var computePipeline: GPUComputePipeline;
-var bindGroup: GPUBindGroup;
-var gpuReadBuffer: GPUBuffer;
-var firstMatrix: Float32Array, secondMatrix: Float32Array;
+let computePipeline: GPUComputePipeline;
+let bindGroup: GPUBindGroup;
+let gpuReadBuffer: GPUBuffer;
+let firstMatrix: Float32Array;
+let secondMatrix: Float32Array;
 
-var iteration = DEFAULT_ITERATION;
-var commandQueue: Array<GPUCommandEncoder> = [];
-var timingEncoder: TimingHelper;
+let iteration = DEFAULT_ITERATION;
+let commandQueue: Array<GPUCommandEncoder> = [];
+let timingEncoder: TimingHelper;
 
 const device = await safeRequestDevice(adapter, ["timestamp-query"], {
-  maxComputeWorkgroupStorageSize: adapter_limits.maxComputeWorkgroupStorageSize,
+	maxComputeWorkgroupStorageSize: adapter_limits.maxComputeWorkgroupStorageSize,
 });
 
 timingEncoder = new TimingHelper(device);
@@ -45,155 +47,155 @@ timingEncoder = new TimingHelper(device);
 // Check if we can get timestamp support here.
 
 function recordCommands() {
-  const commandEncoder = device.createCommandEncoder();
+	const commandEncoder = device.createCommandEncoder();
 
-  const passEncoder = timingEncoder.beginComputePass(commandEncoder);
-  passEncoder.setPipeline(computePipeline);
-  passEncoder.setBindGroup(0, bindGroup);
-  passEncoder.dispatchWorkgroups(
-    dimBOuter / (WORKGROUP_SIZE_X * WORK_PER_THREAD_X) /* x */,
-    dimAOuter / (WORKGROUP_SIZE_Y * WORK_PER_THREAD_Y) /* y */
-  );
-  passEncoder.end();
-  commandQueue.push(commandEncoder);
+	const passEncoder = timingEncoder.beginComputePass(commandEncoder);
+	passEncoder.setPipeline(computePipeline);
+	passEncoder.setBindGroup(0, bindGroup);
+	passEncoder.dispatchWorkgroups(
+		dimBOuter / (WORKGROUP_SIZE_X * WORK_PER_THREAD_X) /* x */,
+		dimAOuter / (WORKGROUP_SIZE_Y * WORK_PER_THREAD_Y) /* y */,
+	);
+	passEncoder.end();
+	commandQueue.push(commandEncoder);
 }
 
 function submitQueue() {
-  // We need the total duration of all kernels in the queue...
-  // If we submit each one, then
-  device.queue.submit(commandQueue.map((enc) => enc.finish()));
-  commandQueue = [];
+	// We need the total duration of all kernels in the queue...
+	// If we submit each one, then
+	device.queue.submit(commandQueue.map((enc) => enc.finish()));
+	commandQueue = [];
 }
 
 document
-  .getElementById("it")
-  .setAttribute("value", DEFAULT_ITERATION.toString());
-document.getElementById("it").setAttribute("max", MAX_ITERATIONS.toString());
-document.getElementById("it").setAttribute("min", MIN_ITERATIONS.toString());
+	.getElementById("it")
+	?.setAttribute("value", DEFAULT_ITERATION.toString());
+document.getElementById("it")?.setAttribute("max", MAX_ITERATIONS.toString());
+document.getElementById("it")?.setAttribute("min", MIN_ITERATIONS.toString());
 (document.getElementById("it") as HTMLInputElement).value =
-  DEFAULT_ITERATION.toString();
+	DEFAULT_ITERATION.toString();
 
 (async () => {
-  if (!navigator.gpu) {
-    console.log(
-      "WebGPU is not supported. Enable chrome://flags/#enable-unsafe-webgpu flag."
-    );
-    return;
-  }
+	if (!navigator.gpu) {
+		console.log(
+			"WebGPU is not supported. Enable chrome://flags/#enable-unsafe-webgpu flag.",
+		);
+		return;
+	}
 
-  timingEncoder = new TimingHelper(device);
+	timingEncoder = new TimingHelper(device);
 
-  // Uniform Buffer
-  const uniformData = new Int32Array([
-    dimAOuter /* A rows */,
-    dimInner /* A columns */,
-    dimInner /* B rows */,
-    dimBOuter /* B columns */,
-  ]);
+	// Uniform Buffer
+	const uniformData = new Int32Array([
+		dimAOuter /* A rows */,
+		dimInner /* A columns */,
+		dimInner /* B rows */,
+		dimBOuter /* B columns */,
+	]);
 
-  const uniformBuffer = device.createBuffer({
-    mappedAtCreation: true,
-    size: uniformData.byteLength,
-    usage: GPUBufferUsage.UNIFORM,
-  });
-  new Int32Array(uniformBuffer.getMappedRange()).set(uniformData);
-  uniformBuffer.unmap();
+	const uniformBuffer = device.createBuffer({
+		mappedAtCreation: true,
+		size: uniformData.byteLength,
+		usage: GPUBufferUsage.UNIFORM,
+	});
+	new Int32Array(uniformBuffer.getMappedRange()).set(uniformData);
+	uniformBuffer.unmap();
 
-  // First Matrix
-  firstMatrix = new Float32Array(dimAOuter * dimInner);
-  for (var i = 0; i < dimAOuter * dimInner; i++) {
-    firstMatrix[i] = Math.random();
-  }
+	// First Matrix
+	firstMatrix = new Float32Array(dimAOuter * dimInner);
+	for (let i = 0; i < dimAOuter * dimInner; i++) {
+		firstMatrix[i] = Math.random();
+	}
 
-  const gpuBufferFirstMatrix = device.createBuffer({
-    mappedAtCreation: true,
-    size: firstMatrix.byteLength,
-    usage: GPUBufferUsage.STORAGE,
-  });
-  new Float32Array(gpuBufferFirstMatrix.getMappedRange()).set(firstMatrix);
-  gpuBufferFirstMatrix.unmap();
+	const gpuBufferFirstMatrix = device.createBuffer({
+		mappedAtCreation: true,
+		size: firstMatrix.byteLength,
+		usage: GPUBufferUsage.STORAGE,
+	});
+	new Float32Array(gpuBufferFirstMatrix.getMappedRange()).set(firstMatrix);
+	gpuBufferFirstMatrix.unmap();
 
-  // Second Matrix
-  secondMatrix = new Float32Array(dimInner * dimBOuter);
-  for (var i = 0; i < dimInner * dimBOuter; i++) {
-    secondMatrix[i] = Math.random();
-  }
+	// Second Matrix
+	secondMatrix = new Float32Array(dimInner * dimBOuter);
+	for (let i = 0; i < dimInner * dimBOuter; i++) {
+		secondMatrix[i] = Math.random();
+	}
 
-  const gpuBufferSecondMatrix = device.createBuffer({
-    mappedAtCreation: true,
-    size: secondMatrix.byteLength,
-    usage: GPUBufferUsage.STORAGE,
-  });
-  new Float32Array(gpuBufferSecondMatrix.getMappedRange()).set(secondMatrix);
-  gpuBufferSecondMatrix.unmap();
+	const gpuBufferSecondMatrix = device.createBuffer({
+		mappedAtCreation: true,
+		size: secondMatrix.byteLength,
+		usage: GPUBufferUsage.STORAGE,
+	});
+	new Float32Array(gpuBufferSecondMatrix.getMappedRange()).set(secondMatrix);
+	gpuBufferSecondMatrix.unmap();
 
-  // Result Matrix
-  const resultMatrixBufferSize =
-    Float32Array.BYTES_PER_ELEMENT * (uniformData[0] * uniformData[3]);
-  const resultMatrixBuffer = device.createBuffer({
-    size: resultMatrixBufferSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-  });
+	// Result Matrix
+	const resultMatrixBufferSize =
+		Float32Array.BYTES_PER_ELEMENT * (uniformData[0] * uniformData[3]);
+	const resultMatrixBuffer = device.createBuffer({
+		size: resultMatrixBufferSize,
+		usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+	});
 
-  // Bind group layout and bind group
+	// Bind group layout and bind group
 
-  const bindGroupLayout = device.createBindGroupLayout({
-    entries: [
-      {
-        binding: 0,
-        visibility: GPUShaderStage.COMPUTE,
-        buffer: { type: "read-only-storage" },
-      },
-      {
-        binding: 1,
-        visibility: GPUShaderStage.COMPUTE,
-        buffer: { type: "read-only-storage" },
-      },
-      {
-        binding: 2,
-        visibility: GPUShaderStage.COMPUTE,
-        buffer: { type: "storage" },
-      },
-      {
-        binding: 3,
-        visibility: GPUShaderStage.COMPUTE,
-        buffer: { type: "uniform" },
-      },
-    ],
-  });
+	const bindGroupLayout = device.createBindGroupLayout({
+		entries: [
+			{
+				binding: 0,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "read-only-storage" },
+			},
+			{
+				binding: 1,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "read-only-storage" },
+			},
+			{
+				binding: 2,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "storage" },
+			},
+			{
+				binding: 3,
+				visibility: GPUShaderStage.COMPUTE,
+				buffer: { type: "uniform" },
+			},
+		],
+	});
 
-  bindGroup = device.createBindGroup({
-    layout: bindGroupLayout,
-    entries: [
-      {
-        binding: 0,
-        resource: {
-          buffer: gpuBufferFirstMatrix,
-        },
-      },
-      {
-        binding: 1,
-        resource: {
-          buffer: gpuBufferSecondMatrix,
-        },
-      },
-      {
-        binding: 2,
-        resource: {
-          buffer: resultMatrixBuffer,
-        },
-      },
-      {
-        binding: 3,
-        resource: {
-          buffer: uniformBuffer,
-        },
-      },
-    ],
-  });
+	bindGroup = device.createBindGroup({
+		layout: bindGroupLayout,
+		entries: [
+			{
+				binding: 0,
+				resource: {
+					buffer: gpuBufferFirstMatrix,
+				},
+			},
+			{
+				binding: 1,
+				resource: {
+					buffer: gpuBufferSecondMatrix,
+				},
+			},
+			{
+				binding: 2,
+				resource: {
+					buffer: resultMatrixBuffer,
+				},
+			},
+			{
+				binding: 3,
+				resource: {
+					buffer: uniformBuffer,
+				},
+			},
+		],
+	});
 
-  // Compute shader code (manually translated from GLSL)
-  const shaderCode = `const WORKGROUP_SIZE_X = ${WORKGROUP_SIZE_X};
+	// Compute shader code (manually translated from GLSL)
+	const shaderCode = `const WORKGROUP_SIZE_X = ${WORKGROUP_SIZE_X};
 const WORKGROUP_SIZE_Y = ${WORKGROUP_SIZE_Y};
 const WORKGROUP_SIZE_Z = 1;
 const WORK_PER_THREAD: vec2<i32> = vec2<i32>(${WORK_PER_THREAD_X}, ${WORK_PER_THREAD_Y});
@@ -296,56 +298,56 @@ fn main(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invoc
     return;
 }`;
 
-  // Pipeline setup
+	// Pipeline setup
 
-  computePipeline = device.createComputePipeline({
-    layout: device.createPipelineLayout({
-      bindGroupLayouts: [bindGroupLayout],
-    }),
-    compute: {
-      module: device.createShaderModule({
-        code: shaderCode,
-      }),
-      entryPoint: "main",
-    },
-  });
+	computePipeline = device.createComputePipeline({
+		layout: device.createPipelineLayout({
+			bindGroupLayouts: [bindGroupLayout],
+		}),
+		compute: {
+			module: device.createShaderModule({
+				code: shaderCode,
+			}),
+			entryPoint: "main",
+		},
+	});
 
-  recordCommands();
+	recordCommands();
 
-  // Get a GPU buffer for reading in an unmapped state.
-  gpuReadBuffer = device.createBuffer({
-    size: resultMatrixBufferSize,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  });
+	// Get a GPU buffer for reading in an unmapped state.
+	gpuReadBuffer = device.createBuffer({
+		size: resultMatrixBufferSize,
+		usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+	});
 
-  // Encode commands for copying buffer to buffer.
-  const commandEncoder = device.createCommandEncoder();
-  commandEncoder.copyBufferToBuffer(
-    resultMatrixBuffer /* source buffer */,
-    0 /* source offset */,
-    gpuReadBuffer /* destination buffer */,
-    0 /* destination offset */,
-    resultMatrixBufferSize /* size */
-  );
-  commandQueue.push(commandEncoder);
+	// Encode commands for copying buffer to buffer.
+	const commandEncoder = device.createCommandEncoder();
+	commandEncoder.copyBufferToBuffer(
+		resultMatrixBuffer /* source buffer */,
+		0 /* source offset */,
+		gpuReadBuffer /* destination buffer */,
+		0 /* destination offset */,
+		resultMatrixBufferSize /* size */,
+	);
+	commandQueue.push(commandEncoder);
 
-  // Submit GPU commands.
-  submitQueue();
+	// Submit GPU commands.
+	submitQueue();
 
-  // Read buffer.
-  await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-  const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
+	await device.queue.onSubmittedWorkDone();
 
-  let acc = 0,
-    m = Math.floor(dimAOuter * Math.random()),
-    n = Math.floor(dimBOuter * Math.random());
-  for (let k = 0; k < dimInner; k++)
-    acc += firstMatrix[m * dimInner + k] * secondMatrix[k * dimBOuter + n];
-  const result = arrayBuffer[m * dimBOuter + n];
+	// Read buffer.
+	await gpuReadBuffer.mapAsync(GPUMapMode.READ);
 
-  // On warmup finished, remove the warmup div.
-  document.getElementById("warmup").remove();
-  /*
+	let acc = 0;
+	const m = Math.floor(dimAOuter * Math.random());
+	const n = Math.floor(dimBOuter * Math.random());
+	for (let k = 0; k < dimInner; k++)
+		acc += firstMatrix[m * dimInner + k] * secondMatrix[k * dimBOuter + n];
+
+	// On warmup finished, remove the warmup div.
+	document.getElementById("warmup")?.remove();
+	/*
   for (var i = 0; i < dimAOuter; i++)
   for (var j = 0; j< dimBOuter; j++)
   {
@@ -357,132 +359,132 @@ fn main(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invoc
     console.log(`result[${i}, ${j}] = ${arrayBuffer[i * dimBOuter + j]}, expectedResult = ${test}`);
   }
   */
-  gpuReadBuffer.unmap();
+	gpuReadBuffer.unmap();
 
-  initializeResultTable();
+	initializeResultTable();
 })();
 
 /// Add event listenner that validates the input and updates iteration
-export function handleChange(e) {
-  // Only allow whole numbers
-  const match = e.target.value.match(/[0]*(\d+)([^\d]|$)/);
-  e.target.value = match ? match[1] : iteration.toString();
+export function handleChange(e: any) {
+	// Only allow whole numbers
+	const match = e.target.value.match(/[0]*(\d+)([^\d]|$)/);
+	e.target.value = match ? match[1] : iteration.toString();
 
-  iteration = Math.min(parseInt(e.target.value), MAX_ITERATIONS);
+	iteration = Math.min(Number.parseInt(e.target.value), MAX_ITERATIONS);
 }
 
 function initializeResultTable() {
-  // Don't initialize if it already exists.
-  if (document.getElementById("tfjs-result-table") !== null) return;
+	// Don't initialize if it already exists.
+	if (document.getElementById("tfjs-result-table") !== null) return;
 
-  // Make the headers
+	// Make the headers
 
-  const resultTable = document.createElement("table");
-  resultTable.id = "tfjs-result-table";
-  resultTable.classList.add("result-table");
-  resultTable.classList.add("tfjs");
-  resultTable.setAttribute("hidden", "");
+	const resultTable = document.createElement("table");
+	resultTable.id = "tfjs-result-table";
+	resultTable.classList.add("result-table");
+	resultTable.classList.add("tfjs");
+	resultTable.setAttribute("hidden", "");
 
-  var header = document.createElement("thead");
-  var headerRow = document.createElement("tr");
-  [
-    { text: "Iterations", tooltip: "Number of iterations" },
-    {
-      text: "Shader time (ms)",
-      tooltip: "Amount of time passed measured using timestamp queries",
-    },
-    { text: "Js time (ms)", tooltip: "" },
-    { text: "GFLOPS", tooltip: "The calculated number of GFLOPS" },
-    {
-      text: "Expected",
-      tooltip: "The expected value of a random element in the result matrix",
-    },
-    {
-      text: "Result",
-      tooltip:
-        "The computed value of the same random element in the result matrix",
-    },
-  ].forEach((entry) => {
-    var th = document.createElement("th");
-    th.textContent = entry.text;
-    th.title = entry.tooltip;
-    headerRow.appendChild(th);
-  });
-  header.appendChild(headerRow);
+	const header = document.createElement("thead");
+	const headerRow = document.createElement("tr");
+	for (const entry of [
+		{ text: "Iterations", tooltip: "Number of iterations" },
+		{
+			text: "Shader time (ms)",
+			tooltip: "Amount of time passed measured using timestamp queries",
+		},
+		{ text: "Js time (ms)", tooltip: "" },
+		{ text: "GFLOPS", tooltip: "The calculated number of GFLOPS" },
+		{
+			text: "Expected",
+			tooltip: "The expected value of a random element in the result matrix",
+		},
+		{
+			text: "Result",
+			tooltip:
+				"The computed value of the same random element in the result matrix",
+		},
+	]) {
+		const th = document.createElement("th");
+		th.textContent = entry.text;
+		th.title = entry.tooltip;
+		headerRow.appendChild(th);
+	}
+	header.appendChild(headerRow);
 
-  resultTable.appendChild(header);
+	resultTable.appendChild(header);
 
-  var tbody = document.createElement("tbody");
-  tbody.id = "tfjs-result-table-body";
-  resultTable.appendChild(tbody);
+	const tbody = document.createElement("tbody");
+	tbody.id = "tfjs-result-table-body";
+	resultTable.appendChild(tbody);
 
-  document.getElementById("tfjs-result-div").appendChild(resultTable);
+	document.getElementById("tfjs-result-div")?.appendChild(resultTable);
 }
 
 function addResultRow(
-  timestamp_time: number,
-  js_time: number,
-  gflops: number,
-  expected: number,
-  result: number,
-  iterations: number
+	timestamp_time: number,
+	js_time: number,
+	gflops: number,
+	expected: number,
+	result: number,
+	iterations: number,
 ) {
-  document.getElementById("tfjs-result-table").removeAttribute("hidden");
-  var tbody = document.getElementById("tfjs-result-table-body");
+	document.getElementById("tfjs-result-table")?.removeAttribute("hidden");
+	const tbody = document.getElementById("tfjs-result-table-body");
 
-  var row = document.createElement("tr");
-  [
-    iterations,
-    timestamp_time.toFixed(TIMESTAMP_PRECISION),
-    js_time.toFixed(TIMESTAMP_PRECISION),
-    gflops,
-    expected.toFixed(RESULT_PRECISION),
-    result.toFixed(RESULT_PRECISION),
-  ].forEach((value) => {
-    var td = document.createElement("td");
-    td.innerText = `${value}`;
-    row.appendChild(td);
-  });
-  tbody.appendChild(row);
+	const row = document.createElement("tr");
+	for (const value of [
+		iterations,
+		timestamp_time.toFixed(TIMESTAMP_PRECISION),
+		js_time.toFixed(TIMESTAMP_PRECISION),
+		gflops,
+		expected.toFixed(RESULT_PRECISION),
+		result.toFixed(RESULT_PRECISION),
+	]) {
+		const td = document.createElement("td");
+		td.innerText = `${value}`;
+		row.appendChild(td);
+	}
+	tbody?.appendChild(row);
 }
 
 export async function run() {
-  //   const computeFence = device.queue.createFence();
-  // iteration = parseInt((document.getElementById("it") as HTMLInputElement).value , 10);
-  var start = performance.now();
-  for (var i = 0; i < iteration; i++) {
-    recordCommands();
-  }
+	//   const computeFence = device.queue.createFence();
+	// iteration = parseInt((document.getElementById("it") as HTMLInputElement).value , 10);
+	const start = performance.now();
+	for (let i = 0; i < iteration; i++) {
+		recordCommands();
+	}
 
-  device.queue.submit(commandQueue.map((enc) => enc.finish()));
-  commandQueue.length = 0;
-  const perf_now_ttl_time = await device.queue
-    .onSubmittedWorkDone()
-    .then(() => {
-      return performance.now() - start;
-    });
+	device.queue.submit(commandQueue.map((enc) => enc.finish()));
+	commandQueue.length = 0;
+	const perf_now_ttl_time = await device.queue
+		.onSubmittedWorkDone()
+		.then(() => {
+			return performance.now() - start;
+		});
 
-  const total_time = await timingEncoder.getResult();
+	const total_time = await timingEncoder.getResult();
 
-  // Read buffer.
-  await gpuReadBuffer.mapAsync(GPUMapMode.READ);
-  const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
+	// Read buffer.
+	await gpuReadBuffer.mapAsync(GPUMapMode.READ);
+	const arrayBuffer = new Float32Array(gpuReadBuffer.getMappedRange());
 
-  let acc = 0,
-    m = Math.floor(dimAOuter * Math.random()),
-    n = Math.floor(dimBOuter * Math.random());
-  for (let k = 0; k < dimInner; k++)
-    acc += firstMatrix[m * dimInner + k] * secondMatrix[k * dimBOuter + n];
+	let acc = 0;
+	const m = Math.floor(dimAOuter * Math.random());
+	const n = Math.floor(dimBOuter * Math.random());
+	for (let k = 0; k < dimInner; k++)
+		acc += firstMatrix[m * dimInner + k] * secondMatrix[k * dimBOuter + n];
 
-  const meanTime = total_time / 1000000 / iteration;
-  const meanTimePNow = perf_now_ttl_time / iteration;
-  addResultRow(
-    meanTime,
-    meanTimePNow,
-    Math.round((2 * dimAOuter * dimBOuter * dimInner) / meanTime / 10000) / 100,
-    acc,
-    arrayBuffer[m * dimBOuter + n],
-    iteration
-  );
-  gpuReadBuffer.unmap();
+	const meanTime = total_time / 1000000 / iteration;
+	const meanTimePNow = perf_now_ttl_time / iteration;
+	addResultRow(
+		meanTime,
+		meanTimePNow,
+		Math.round((2 * dimAOuter * dimBOuter * dimInner) / meanTime / 10000) / 100,
+		acc,
+		arrayBuffer[m * dimBOuter + n],
+		iteration,
+	);
+	gpuReadBuffer.unmap();
 }

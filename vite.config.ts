@@ -1,17 +1,24 @@
-import { defineConfig, UserConfig } from "vite";
+import { type UserConfig, defineConfig } from "vite";
 
 /** @type {import('vite').UserConfig} */
 export default defineConfig({
-  base: "./public",
-  root: "./src",
-  build: {
-    outDir: "../public/dist", // corresponds to "outDir": "./public/dist"
-    target: "es2022", // corresponds to "target": "es2022"
-    minify: false,
-  },
-  resolve: {
-    alias: {
-      "@src": "/src",
-    },
-  },
+	root: ".",
+	build: {
+		outDir: "dist", // corresponds to "outDir": "./public/dist"
+		target: "es2022", // corresponds to "target": "es2022"
+		minify: false,
+		rollupOptions: {
+			input: {
+				dequantize: "/benchmarks/dequantize.html",
+				matmul: "/benchmarks/matmul.html",
+			},
+		},
+	},
+	resolve: {
+		alias: {
+			scripts: "/src/scripts",
+			src: "/src",
+			"@": "/src/scripts",
+		},
+	},
 }) satisfies UserConfig;

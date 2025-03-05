@@ -1,29 +1,33 @@
 {
-  "compilerOptions": {
-    "target": "es2022",
-    "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "es2022",
-    "skipLibCheck": true,
+	"compilerOptions": {
+		"target": "es2022",
+		"useDefineForClassFields": true,
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "es2022",
+		"skipLibCheck": true,
+		"paths": {
+			"src/*": ["./src/*"],
+			"scripts/*": ["./src/scripts/*"]
+		},
 
-    /* Bundler Mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "noEmit": true,
+		/* Bundler Mode */
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"isolatedModules": true,
+		"moduleDetection": "force",
+		"noEmit": true,
 
-    "rootDir": "./src",
-    "types": ["@webgpu/types"],
-    "outDir": "./public/dist",
-    
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noUncheckedSideEffectImports": true,
-    "forceConsistentCasingInFileNames": true /* Ensure that casing is correct in imports. */,
-  },
-  "include": ["./src"],
-  "exclude": ["node_modules"]
+		"rootDir": "./src",
+		"types": ["@webgpu/types"],
+		"outDir": "./public/dist",
+
+		/* Linting */
+		"strict": false,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noUncheckedSideEffectImports": true,
+		"forceConsistentCasingInFileNames": true /* Ensure that casing is correct in imports. */
+	},
+	"include": ["src"],
+	"exclude": ["node_modules"]
 }
