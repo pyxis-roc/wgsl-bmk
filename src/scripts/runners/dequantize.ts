@@ -238,7 +238,6 @@ export class Dequantize {
 	 */
 	public async run(
 		numIterations: number,
-		result_index = 0,
 	): Promise<kernelExecutionResults> {
 		if (!this.initialized) {
 			console.error("Initialization is still running...");
