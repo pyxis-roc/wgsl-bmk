@@ -1,6 +1,7 @@
 import { TimingHelper } from "#scripts/classes/TimingHelper.mjs";
 import { adapter, adapter_limits, safeRequestDevice } from "#scripts/gpu_setup";
 
+
 // The maximum memory we need
 const dimAOuter = 1024;
 const dimInner = 1024;
@@ -293,7 +294,7 @@ fn mm_matMul(local_invocation_id: vec3<u32>, global_invocation_id: vec3<u32>) {
   }
 }
 @compute @workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, WORKGROUP_SIZE_Z)
-fn main(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invocation_id) gid: vec3<u32>) {
+fn main_matmul(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invocation_id) gid: vec3<u32>) {
     mm_matMul(local_id, gid);
     return;
 }`;
@@ -308,7 +309,7 @@ fn main(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invoc
 			module: device.createShaderModule({
 				code: shaderCode,
 			}),
-			entryPoint: "main",
+			entryPoint: "main_matmul",
 		},
 	});
 

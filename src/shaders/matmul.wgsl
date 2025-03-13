@@ -111,7 +111,7 @@ fn mm_matMul(local_invocation_id: vec3<u32>, global_invocation_id: vec3<u32>) {
 }
 
 @compute @workgroup_size(64, 64, 1) 
-fn main(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invocation_id) gid: vec3<u32>) {
+fn main_matmul(@builtin(local_invocation_id) local_id: vec3<u32>, @builtin(global_invocation_id) gid: vec3<u32>) {
     mm_matMul(local_id, gid);
     return;
 }
